@@ -217,7 +217,7 @@ mod tests {
         String::from_utf8(out)
             .unwrap()
             .lines()
-            .map(|l| l.to_owned())
+            .map(str::to_owned)
             .collect()
     }
 
@@ -234,13 +234,10 @@ mod tests {
         let out = run_shuffle(bed, false, 42);
         for line in &out {
             let cols: Vec<&str> = line.split('\t').collect();
-            let start: u64 = cols[1].parse().unwrap();
             let end: u64 = cols[2].parse().unwrap();
+            let start: u64 = cols[1].parse().unwrap();
             let len = end - start;
-            assert!(
-                len == 100 || len == 100,
-                "feature length must be preserved (got {len})"
-            );
+            assert!(len == 100, "feature length must be preserved (got {len})");
         }
     }
 

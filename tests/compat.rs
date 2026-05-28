@@ -36,7 +36,7 @@ fn run(bed: &str, same_chrom: bool, seed: u64) -> Vec<String> {
     String::from_utf8(out)
         .unwrap()
         .lines()
-        .map(|l| l.to_owned())
+        .map(str::to_owned)
         .collect()
 }
 
@@ -85,7 +85,6 @@ fn coords_within_genome_bounds() {
         for line in &out {
             let c: Vec<&str> = line.split('\t').collect();
             let chrom = c[0];
-            let start: u64 = c[1].parse().unwrap();
             let end: u64 = c[2].parse().unwrap();
             let chrom_len = *genome.get(chrom).unwrap();
             assert!(
