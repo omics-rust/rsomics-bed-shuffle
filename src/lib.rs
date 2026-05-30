@@ -1,30 +1,13 @@
-//! Randomly relocate BED intervals within a genome — `bedtools shuffle` equivalent.
+//! Randomly relocate BED intervals within a genome — bedtools shuffle equivalent.
 //!
-//! Reads chromosome sizes from a genome file and randomly moves each BED
-//! feature to a valid genomic coordinate, preserving feature length.
-//!
-//! ## Algorithm
-//!
-//! For each input record:
-//! 1. Pick a random chromosome proportional to its available length.
-//! 2. Pick a random start within `[0, chrom_len - feature_len]`.
-//! 3. Set end = start + `feature_len`.
-//!
-//! With `--chrom`, the chromosome is kept the same as the input; only
-//! the start position is randomised.
-//!
-//! ## Determinism
-//!
-//! Provide `--seed` for reproducible output (uses a simple LCG).
+//! Chromosomes are weighted by length when picking a random target. Use `--seed`
+//! for reproducible output.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 
 use rsomics_common::{Result, RsomicsError};
 
-/// Parse a genome (chrom sizes) file into a `HashMap<name, length>`.
-///
-/// Each non-blank, non-comment line must have `<chrom>\t<size>`.
 pub fn parse_genome<R: Read>(r: R) -> Result<HashMap<String, u64>> {
     let mut map = HashMap::new();
     for line in BufReader::new(r).lines() {
@@ -55,11 +38,7 @@ pub struct ShuffleOptions {
     pub seed: Option<u64>,
 }
 
-/// Shuffle BED features from `r` to random genomic positions, writing to `w`.
-///
-/// `genome` maps chromosome name → length.  Features whose length exceeds
-/// the chromosome are skipped (matching bedtools behaviour — they cannot be
-/// placed).
+/// Features too long to fit any chromosome are skipped (matches bedtools).
 #[allow(clippy::implicit_hasher)]
 pub fn shuffle<R: Read, W: Write>(
     r: R,
@@ -67,11 +46,9 @@ pub fn shuffle<R: Read, W: Write>(
     genome: &HashMap<String, u64>,
     opts: &ShuffleOptions,
 ) -> Result<()> {
-    // Build sorted list of (chrom, len) for weighted random chromosome selection.
     let mut chroms: Vec<(&str, u64)> = genome.iter().map(|(k, &v)| (k.as_str(), v)).collect();
     chroms.sort_unstable_by_key(|(c, _)| *c);
 
-    // Prefix-sum of lengths for weighted chromosome picking.
     let total_len: u64 = chroms.iter().map(|(_, l)| l).sum();
     let prefix: Vec<u64> = {
         let mut acc = 0u64;
@@ -126,14 +103,12 @@ pub fn shuffle<R: Read, W: Write>(
         }
         let feat_len = end - start;
 
-        // Determine target chromosome.
         let (target_chrom, chrom_len) = if opts.same_chrom {
             let len = genome.get(chrom).copied().ok_or_else(|| {
                 RsomicsError::InvalidInput(format!("chromosome not in genome: {chrom}"))
             })?;
             (chrom, len)
         } else {
-            // Pick chromosome weighted by length.
             let pick = rng.next_u64() % total_len;
             let idx = prefix.partition_point(|&p| p <= pick);
             (
@@ -143,7 +118,6 @@ pub fn shuffle<R: Read, W: Write>(
         };
 
         if chrom_len < feat_len {
-            // Feature cannot fit; skip (matches bedtools behaviour).
             continue;
         }
 
@@ -151,7 +125,6 @@ pub fn shuffle<R: Read, W: Write>(
         let new_start = rng.next_u64() % (max_start + 1);
         let new_end = new_start + feat_len;
 
-        // Emit: new coords + any extra columns preserved.
         let extra = if cols.len() > 3 {
             format!("\t{}", cols[3])
         } else {
@@ -164,10 +137,7 @@ pub fn shuffle<R: Read, W: Write>(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// LCG RNG (same constants as bed-sample)
-// ---------------------------------------------------------------------------
-
+/// Same constants as bed-sample (Knuth's MMIX).
 struct LcgRng {
     state: u64,
 }

@@ -13,10 +13,6 @@ pub const META: ToolMeta = ToolMeta {
     version: env!("CARGO_PKG_VERSION"),
 };
 
-/// Randomly relocate BED intervals within a genome — bedtools shuffle equivalent.
-///
-/// Reads chromosome sizes from a genome file and moves each BED feature to a
-/// random genomic position, preserving the feature length.
 #[derive(Parser, Debug)]
 #[command(name = "rsomics-bed-shuffle", disable_help_flag = true)]
 pub struct Cli {
