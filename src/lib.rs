@@ -38,7 +38,14 @@ pub struct ShuffleOptions {
     pub seed: Option<u64>,
 }
 
-/// Features too long to fit any chromosome are skipped (matches bedtools).
+/// bedtools retries placement across chromosomes; a feature that fits any
+/// allowed chromosome is always emitted. A feature longer than every
+/// chromosome cannot be placed and is dropped with a stderr warning.
+const MAX_TRIES: u32 = 1_000_000;
+
+/// A feature that fits some allowed chromosome always produces one output line;
+/// a feature longer than every chromosome is dropped with a stderr warning
+/// (matches bedtools).
 #[allow(clippy::implicit_hasher)]
 pub fn shuffle<R: Read, W: Write>(
     r: R,
@@ -50,6 +57,11 @@ pub fn shuffle<R: Read, W: Write>(
     chroms.sort_unstable_by_key(|(c, _)| *c);
 
     let total_len: u64 = chroms.iter().map(|(_, l)| l).sum();
+    if total_len == 0 {
+        return Err(RsomicsError::InvalidInput(
+            "genome has zero total length (no chromosomes with a positive size)".to_owned(),
+        ));
+    }
     let prefix: Vec<u64> = {
         let mut acc = 0u64;
         chroms
@@ -103,26 +115,32 @@ pub fn shuffle<R: Read, W: Write>(
         }
         let feat_len = end - start;
 
-        let (target_chrom, chrom_len) = if opts.same_chrom {
+        let placement = if opts.same_chrom {
             let len = genome.get(chrom).copied().ok_or_else(|| {
                 RsomicsError::InvalidInput(format!("chromosome not in genome: {chrom}"))
             })?;
-            (chrom, len)
+            (len >= feat_len).then(|| (chrom, rng.next_u64() % (len - feat_len + 1)))
         } else {
-            let pick = rng.next_u64() % total_len;
-            let idx = prefix.partition_point(|&p| p <= pick);
-            (
-                chroms[idx.min(chroms.len() - 1)].0,
-                chroms[idx.min(chroms.len() - 1)].1,
-            )
+            let mut placed = None;
+            for _ in 0..MAX_TRIES {
+                let pick = rng.next_u64() % total_len;
+                let idx = prefix.partition_point(|&p| p <= pick).min(chroms.len() - 1);
+                let (tc, cl) = chroms[idx];
+                if cl < feat_len {
+                    continue;
+                }
+                placed = Some((tc, rng.next_u64() % (cl - feat_len + 1)));
+                break;
+            }
+            placed
         };
 
-        if chrom_len < feat_len {
+        let Some((target_chrom, new_start)) = placement else {
+            eprintln!(
+                "rsomics-bed-shuffle: warning: feature {chrom}:{start}-{end} (length {feat_len}) does not fit any allowed chromosome; skipping"
+            );
             continue;
-        }
-
-        let max_start = chrom_len - feat_len;
-        let new_start = rng.next_u64() % (max_start + 1);
+        };
         let new_end = new_start + feat_len;
 
         let extra = if cols.len() > 3 {
