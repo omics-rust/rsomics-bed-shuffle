@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io;
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -49,13 +49,17 @@ impl Tool for Cli {
             allow_beyond_chrom_end: false,
             seed: self.common.seed,
         };
-        let mut stdout_lock = io::stdout().lock();
+        let mut out: Box<dyn Write> = if self.common.json {
+            Box::new(io::sink())
+        } else {
+            Box::new(io::stdout().lock())
+        };
         if let Some(ref p) = self.input {
             let f = File::open(p).map_err(RsomicsError::Io)?;
-            shuffle(f, &mut stdout_lock, &genome, &opts)
+            shuffle(f, &mut out, &genome, &opts)
         } else {
             let stdin = io::stdin();
-            shuffle(stdin.lock(), &mut stdout_lock, &genome, &opts)
+            shuffle(stdin.lock(), &mut out, &genome, &opts)
         }
     }
 }
